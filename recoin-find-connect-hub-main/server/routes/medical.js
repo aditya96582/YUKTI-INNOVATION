@@ -1,65 +1,57 @@
 /**
- * Medical Connect Routes
+ * Medical Connect Routes — MongoDB Backed
  */
 
 const express = require('express');
 const router = express.Router();
-const { db } = require('../data/db');
+const { MedicalRequest } = require('../config/database');
 const ocrService = require('../services/ocrService');
 const notificationService = require('../services/notificationService');
 
 /**
- * GET /api/medical
- * Get all medical requests
+ * GET /api/medical — Get all medical requests
  */
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    if (!db.medicalRequests) db.medicalRequests = [];
-    res.json({ success: true, requests: db.medicalRequests });
+    const requests = await MedicalRequest.find().sort({ createdAt: -1 });
+    res.json({ success: true, requests });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /**
- * POST /api/medical
- * Create new medical request
+ * POST /api/medical — Create new medical request
  */
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { medicines, location, userId, userName, prescriptionImage } = req.body;
 
     if (!medicines || !location || !userId) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: medicines, location, userId'
+        error: 'Missing required fields: medicines, location, userId',
       });
     }
 
-    const request = {
-      id: `med_${Date.now()}`,
+    const request = await MedicalRequest.create({
       medicines,
       location,
       userId,
       userName,
-      prescriptionImage,
+      prescriptionImage: prescriptionImage || '',
       status: 'pending',
       pharmacyResponses: [],
-      createdAt: new Date().toISOString()
-    };
+    });
 
-    if (!db.medicalRequests) db.medicalRequests = [];
-    db.medicalRequests.push(request);
-
-    res.json({ success: true, request, id: request.id });
+    res.json({ success: true, request, id: request._id.toString() });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /**
- * POST /api/medical/ocr/extract
- * Extract medicines from prescription image using OCR
+ * POST /api/medical/ocr/extract — Extract medicines from prescription
  */
 router.post('/ocr/extract', async (req, res) => {
   try {
@@ -68,17 +60,16 @@ router.post('/ocr/extract', async (req, res) => {
     if (!imageBase64 && !requestId) {
       return res.status(400).json({
         success: false,
-        error: 'Either imageBase64 or requestId is required'
+        error: 'Either imageBase64 or requestId is required',
       });
     }
 
-    // Simulate OCR extraction
     const result = await ocrService.extractMedicines(imageBase64 || 'mock');
 
     res.json({
       success: true,
       medicines: result.medicines,
-      ocrText: result.ocrText
+      ocrText: result.ocrText,
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -86,26 +77,21 @@ router.post('/ocr/extract', async (req, res) => {
 });
 
 /**
- * POST /api/medical/:id/notify
- * Notify nearby pharmacies about medical request
+ * POST /api/medical/:id/notify — Notify nearby pharmacies
  */
 router.post('/:id/notify', async (req, res) => {
   try {
     const { id } = req.params;
-
-    if (!db.medicalRequests) db.medicalRequests = [];
-    const request = db.medicalRequests.find(r => r.id === id);
+    const request = await MedicalRequest.findById(id);
 
     if (!request) {
       return res.status(404).json({ success: false, error: 'Request not found' });
     }
 
-    // Update status
     request.status = 'notified';
+    await request.save();
 
-    // Simulate notifying pharmacies (in production, this would send real notifications)
     const pharmacyUserIds = ['pharmacy_1', 'pharmacy_2', 'pharmacy_3'];
-    
     await notificationService.notifyPharmacies(request, pharmacyUserIds);
 
     res.json({ success: true, message: 'Pharmacies notified', notifiedCount: pharmacyUserIds.length });
@@ -115,17 +101,14 @@ router.post('/:id/notify', async (req, res) => {
 });
 
 /**
- * POST /api/medical/:id/respond
- * Pharmacy responds to medical request
+ * POST /api/medical/:id/respond — Pharmacy responds to request
  */
-router.post('/:id/respond', (req, res) => {
+router.post('/:id/respond', async (req, res) => {
   try {
     const { id } = req.params;
     const { pharmacyName, available, price, estimatedTime } = req.body;
 
-    if (!db.medicalRequests) db.medicalRequests = [];
-    const request = db.medicalRequests.find(r => r.id === id);
-
+    const request = await MedicalRequest.findById(id);
     if (!request) {
       return res.status(404).json({ success: false, error: 'Request not found' });
     }
@@ -135,11 +118,12 @@ router.post('/:id/respond', (req, res) => {
       available: available !== false,
       price: price || 0,
       estimatedTime: estimatedTime || '30 minutes',
-      respondedAt: new Date().toISOString()
+      respondedAt: new Date(),
     };
 
     request.pharmacyResponses.push(response);
     request.status = 'matched';
+    await request.save();
 
     res.json({ success: true, response });
   } catch (error) {
@@ -148,17 +132,14 @@ router.post('/:id/respond', (req, res) => {
 });
 
 /**
- * POST /api/medical/:id/accept
- * User accepts a pharmacy response
+ * POST /api/medical/:id/accept — User accepts a pharmacy response
  */
-router.post('/:id/accept', (req, res) => {
+router.post('/:id/accept', async (req, res) => {
   try {
     const { id } = req.params;
     const { pharmacyName, deliveryMode } = req.body;
 
-    if (!db.medicalRequests) db.medicalRequests = [];
-    const request = db.medicalRequests.find(r => r.id === id);
-
+    const request = await MedicalRequest.findById(id);
     if (!request) {
       return res.status(404).json({ success: false, error: 'Request not found' });
     }
@@ -166,6 +147,7 @@ router.post('/:id/accept', (req, res) => {
     request.acceptedPharmacy = pharmacyName;
     request.deliveryMode = deliveryMode || 'pickup';
     request.status = 'accepted';
+    await request.save();
 
     res.json({ success: true, message: 'Pharmacy accepted' });
   } catch (error) {
@@ -174,22 +156,19 @@ router.post('/:id/accept', (req, res) => {
 });
 
 /**
- * POST /api/medical/:id/fulfill
- * Mark medical request as fulfilled
+ * POST /api/medical/:id/fulfill — Mark request as fulfilled
  */
-router.post('/:id/fulfill', (req, res) => {
+router.post('/:id/fulfill', async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!db.medicalRequests) db.medicalRequests = [];
-    const request = db.medicalRequests.find(r => r.id === id);
-
+    const request = await MedicalRequest.findById(id);
     if (!request) {
       return res.status(404).json({ success: false, error: 'Request not found' });
     }
 
     request.status = 'fulfilled';
-    request.fulfilledAt = new Date().toISOString();
+    await request.save();
 
     res.json({ success: true, message: 'Request fulfilled' });
   } catch (error) {
@@ -198,22 +177,19 @@ router.post('/:id/fulfill', (req, res) => {
 });
 
 /**
- * GET /api/medical/alternatives/:medicineName
- * Get alternative medicines
+ * GET /api/medical/alternatives/:medicineName — Get alternatives
  */
 router.get('/alternatives/:medicineName', (req, res) => {
   try {
     const { medicineName } = req.params;
 
-    // Mock alternatives (in production, use a real medicine database)
     const alternatives = {
       'paracetamol': ['Crocin', 'Dolo', 'Calpol'],
       'cetirizine': ['Zyrtec', 'Alerid', 'Cetrizet'],
-      'amoxicillin': ['Amoxil', 'Moxikind', 'Novamox']
+      'amoxicillin': ['Amoxil', 'Moxikind', 'Novamox'],
     };
 
     const alts = alternatives[medicineName.toLowerCase()] || [];
-
     res.json({ success: true, alternatives: alts });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });

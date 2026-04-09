@@ -1,6 +1,19 @@
-const { db } = require('../data/db');
+/**
+ * OCR Service — Simulated OCR for prescription scanning
+ */
 
 const DOSAGE_KEYWORDS = ['once', 'twice', 'thrice', 'daily', 'morning', 'night', 'evening', 'bd', 'tds', 'od', 'sos', 'after food', 'before food'];
+
+// Static alternatives data (was previously in db.alternatives)
+const ALTERNATIVES = {
+  paracetamol: ['Crocin 500mg', 'Dolo 650mg', 'Calpol 500mg'],
+  cetirizine: ['Zyrtec 10mg', 'Alerid 10mg', 'Cetrizet 10mg'],
+  amoxicillin: ['Amoxil 250mg', 'Moxikind 250mg', 'Novamox 250mg'],
+  metformin: ['Glycomet 500mg', 'Cetapin 500mg'],
+  aspirin: ['Ecosprin 75mg', 'Disprin 325mg'],
+  azithromycin: ['Azee 500mg', 'Zithromax 500mg'],
+  atorvastatin: ['Lipitor 10mg', 'Atorva 10mg'],
+};
 
 function simulateOCR(imageBase64) {
   const prescriptionTexts = [
@@ -37,7 +50,7 @@ function extractMedicines(ocrText) {
 
 function findAlternatives(medicineName) {
   const name = medicineName.toLowerCase();
-  for (const [key, alts] of Object.entries(db.alternatives)) {
+  for (const [key, alts] of Object.entries(ALTERNATIVES)) {
     if (name.includes(key)) return alts;
   }
   return [];

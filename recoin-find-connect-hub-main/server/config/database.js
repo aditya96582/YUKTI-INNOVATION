@@ -1,133 +1,219 @@
 /**
- * Database Configuration
- * Supports MongoDB for production and in-memory for development
+ * MongoDB Atlas Database Configuration
+ * All data is persisted to cloud MongoDB — no in-memory fallback.
  */
 
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
-const DATABASE_URL = process.env.MONGODB_URI || 'mongodb://localhost:27017/campusconnect';
-const USE_MONGODB = process.env.USE_MONGODB === 'true';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://campus:rishu1KUMAR@campusai.bqm5pwv.mongodb.net/campusconnect?appName=CampusAI';
 
-// MongoDB Schemas
+// ─── User Schema ────────────────────────────────────────────────────────────────
 const UserSchema = new mongoose.Schema({
-  email: { type: String, required: true, unique: true },
-  name: { type: String, required: true },
-  password: { type: String, required: true },
-  location: String,
-  phone: String,
-  bio: String,
-  tokens: { type: Number, default: 0 },
-  reputation: { type: Number, default: 0 },
-  helps: { type: Number, default: 0 },
-  institutionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Institution' },
-  role: { type: String, enum: ['user', 'pharmacy', 'admin'], default: 'user' },
-  pushToken: String,
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now }
+  name:        { type: String, required: true },
+  email:       { type: String, required: true, unique: true, lowercase: true, trim: true },
+  password:    { type: String, required: true },
+  location:    { type: String, default: '' },
+  phone:       { type: String, default: '' },
+  bio:         { type: String, default: '' },
+  tokens:      { type: Number, default: 10 },
+  reputation:  { type: Number, default: 0 },
+  totalHelps:  { type: Number, default: 0 },
+  badges:      { type: [String], default: [] },
+  tokenHistory: { type: Array, default: [] },
+  joinedDate:  { type: Date, default: Date.now },
+  role:        { type: String, enum: ['user', 'pharmacy', 'admin'], default: 'user' },
+  pushToken:   { type: String, default: '' },
+}, { timestamps: true });
+
+// Hash password before save
+UserSchema.pre('save', async function (next) {
+  if (!this.isModified('password')) return next();
+  this.password = await bcrypt.hash(this.password, 12);
+  next();
 });
 
-const InstitutionSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  type: { type: String, enum: ['college', 'university', 'school', 'corporate', 'government'], required: true },
-  location: String,
-  adminEmail: String,
-  settings: {
-    aiMatchThreshold: { type: Number, default: 85 },
-    rewardMultiplier: { type: Number, default: 1 },
-    enableEmergency: { type: Boolean, default: true },
-    enableMedical: { type: Boolean, default: true }
-  },
-  active: { type: Boolean, default: true },
-  createdAt: { type: Date, default: Date.now }
-});
+// Compare password method
+UserSchema.methods.comparePassword = async function (candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
+};
 
+// Strip password from JSON
+UserSchema.methods.toJSON = function () {
+  const obj = this.toObject();
+  delete obj.password;
+  return obj;
+};
+
+// ─── Lost Item Schema ───────────────────────────────────────────────────────────
 const LostItemSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  description: { type: String, required: true },
-  category: { type: String, required: true },
-  location: { type: String, required: true },
-  date: { type: Date, required: true },
-  image: String,
-  imageFeatures: [Number], // AI feature vector
-  reward: { type: Number, default: 0 },
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  institutionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Institution' },
-  status: { type: String, enum: ['active', 'matched', 'resolved'], default: 'active' },
-  matchedWith: { type: mongoose.Schema.Types.ObjectId, ref: 'FoundItem' },
-  createdAt: { type: Date, default: Date.now }
-});
+  title:         { type: String, required: true },
+  description:   { type: String, required: true },
+  category:      { type: String, required: true },
+  location:      { type: String, required: true },
+  date:          { type: String, required: true },
+  image:         { type: String, default: null },
+  imageFeatures: { type: [Number], default: [] },
+  reward:        { type: Number, default: 0 },
+  userId:        { type: String, required: true },
+  userName:      { type: String, required: true },
+  status:        { type: String, enum: ['active', 'matched', 'resolved'], default: 'active' },
+  aiGenerated:   { type: Boolean, default: false },
+}, { timestamps: true });
 
+// ─── Found Item Schema ──────────────────────────────────────────────────────────
 const FoundItemSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  description: { type: String, required: true },
-  category: { type: String, required: true },
-  location: { type: String, required: true },
-  date: { type: Date, required: true },
-  image: String,
-  imageFeatures: [Number], // AI feature vector
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  institutionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Institution' },
-  status: { type: String, enum: ['active', 'matched', 'resolved'], default: 'active' },
-  matchedWith: { type: mongoose.Schema.Types.ObjectId, ref: 'LostItem' },
-  createdAt: { type: Date, default: Date.now }
-});
+  title:         { type: String, required: true },
+  description:   { type: String, required: true },
+  category:      { type: String, required: true },
+  location:      { type: String, required: true },
+  date:          { type: String, required: true },
+  image:         { type: String, default: null },
+  imageFeatures: { type: [Number], default: [] },
+  userId:        { type: String, required: true },
+  userName:      { type: String, required: true },
+  status:        { type: String, enum: ['active', 'matched', 'resolved'], default: 'active' },
+}, { timestamps: true });
 
+// ─── Match Schema ───────────────────────────────────────────────────────────────
 const MatchSchema = new mongoose.Schema({
-  lostItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'LostItem', required: true },
-  foundItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoundItem', required: true },
-  confidence: { type: Number, required: true },
-  imageSimilarity: Number,
-  objectMatch: Number,
-  metadataMatch: Number,
-  matchReason: String,
-  detectedObjects: [String],
-  status: { type: String, enum: ['pending', 'accepted', 'rejected'], default: 'pending' },
-  createdAt: { type: Date, default: Date.now }
-});
+  lostItemId:      { type: String, required: true },
+  foundItemId:     { type: String, required: true },
+  confidence:      { type: Number, required: true },
+  matchType:       { type: String, enum: ['text', 'image', 'hybrid'], default: 'text' },
+  lostTitle:       { type: String, default: '' },
+  foundTitle:      { type: String, default: '' },
+  imageSimilarity: { type: Number, default: 0 },
+  objectMatch:     { type: Number, default: 0 },
+  metadataMatch:   { type: Number, default: 0 },
+  matchReason:     { type: String, default: '' },
+  detectedObjects: { type: [String], default: [] },
+  reasons:         { type: [String], default: [] },
+  status:          { type: String, enum: ['pending', 'accepted', 'rejected'], default: 'pending' },
+}, { timestamps: true });
 
+// ─── Emergency Schema ───────────────────────────────────────────────────────────
+const EmergencySchema = new mongoose.Schema({
+  type:           { type: String, enum: ['blood', 'medical', 'safety', 'other'], required: true },
+  title:          { type: String, required: true },
+  description:    { type: String, required: true },
+  location:       { type: String, required: true },
+  urgency:        { type: String, enum: ['critical', 'high', 'medium', 'low'], required: true },
+  bloodGroup:     { type: String, enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', ''], default: '' },
+  userId:         { type: String, required: true },
+  userName:       { type: String, required: true },
+  contactNumber:  { type: String, default: '' },
+  resolved:       { type: Boolean, default: false },
+  respondents:    { type: Number, default: 0 },
+  respondentList: { type: [String], default: [] },
+}, { timestamps: true });
+
+// ─── Medical Request Schema ─────────────────────────────────────────────────────
+const MedicalRequestSchema = new mongoose.Schema({
+  medicines: [{
+    name:     { type: String, required: true },
+    dosage:   { type: String, default: '' },
+    quantity: { type: String, default: '' },
+  }],
+  prescriptionImage: { type: String, default: '' },
+  location:          { type: String, required: true },
+  userId:            { type: String, required: true },
+  userName:          { type: String, required: true },
+  status:            { type: String, enum: ['pending', 'notified', 'matched', 'fulfilled'], default: 'pending' },
+  pharmacyResponses: [{
+    pharmacyName:      { type: String },
+    available:         { type: Boolean },
+    price:             { type: Number },
+    contact:           { type: String },
+    deliveryAvailable: { type: Boolean },
+    estimatedTime:     { type: String },
+    respondedAt:       { type: Date, default: Date.now },
+  }],
+  acceptedPharmacy:  { type: String, default: '' },
+  deliveryMode:      { type: String, enum: ['pickup', 'delivery', ''], default: '' },
+}, { timestamps: true });
+
+// ─── Chat Conversation Schema ───────────────────────────────────────────────────
+const ChatConversationSchema = new mongoose.Schema({
+  participants: [{
+    id:     { type: String, required: true },
+    name:   { type: String, required: true },
+    avatar: { type: String, default: '' },
+  }],
+  relatedTo: {
+    type:  { type: String, enum: ['lost', 'found', 'emergency', 'medical', ''], default: '' },
+    id:    { type: String, default: '' },
+    title: { type: String, default: '' },
+  },
+  lastMessage:     { type: String, default: '' },
+  lastMessageTime: { type: Date, default: Date.now },
+  unreadCount:     { type: Number, default: 0 },
+}, { timestamps: true });
+
+// ─── Chat Message Schema ────────────────────────────────────────────────────────
+const ChatMessageSchema = new mongoose.Schema({
+  conversationId: { type: mongoose.Schema.Types.ObjectId, ref: 'ChatConversation', required: true },
+  senderId:       { type: String, required: true },
+  senderName:     { type: String, required: true },
+  content:        { type: String, required: true },
+  type:           { type: String, enum: ['text', 'system'], default: 'text' },
+}, { timestamps: true });
+
+// ─── Notification Schema ────────────────────────────────────────────────────────
+const NotificationSchema = new mongoose.Schema({
+  userId:      { type: String, required: true },
+  type:        { type: String, enum: ['match', 'message', 'emergency', 'medical', 'reward', 'system'], required: true },
+  title:       { type: String, required: true },
+  description: { type: String, default: '' },
+  read:        { type: Boolean, default: false },
+  actionUrl:   { type: String, default: '' },
+  metadata:    { type: mongoose.Schema.Types.Mixed, default: {} },
+}, { timestamps: true });
+
+// ─── Redemption Schema ──────────────────────────────────────────────────────────
 const RedemptionSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  partnerId: { type: String, required: true },
-  partnerName: { type: String, required: true },
-  coinsRedeemed: { type: Number, required: true },
+  userId:          { type: String, required: true },
+  partnerId:       { type: String, required: true },
+  partnerName:     { type: String, required: true },
+  coinsRedeemed:   { type: Number, required: true },
   redemptionValue: { type: Number, required: true },
-  voucherCode: String,
-  voucherUrl: String,
-  expiryDate: Date,
-  status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
-  createdAt: { type: Date, default: Date.now }
-});
+  voucherCode:     { type: String, default: '' },
+  voucherUrl:      { type: String, default: '' },
+  expiryDate:      { type: Date },
+  status:          { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
+}, { timestamps: true });
 
-// Models
-let User, Institution, LostItem, FoundItem, Match, Redemption;
-
-if (USE_MONGODB) {
-  User = mongoose.model('User', UserSchema);
-  Institution = mongoose.model('Institution', InstitutionSchema);
-  LostItem = mongoose.model('LostItem', LostItemSchema);
-  FoundItem = mongoose.model('FoundItem', FoundItemSchema);
-  Match = mongoose.model('Match', MatchSchema);
-  Redemption = mongoose.model('Redemption', RedemptionSchema);
-}
+// ─── Register Models ────────────────────────────────────────────────────────────
+const User              = mongoose.model('User', UserSchema);
+const LostItem          = mongoose.model('LostItem', LostItemSchema);
+const FoundItem         = mongoose.model('FoundItem', FoundItemSchema);
+const Match             = mongoose.model('Match', MatchSchema);
+const Emergency         = mongoose.model('Emergency', EmergencySchema);
+const MedicalRequest    = mongoose.model('MedicalRequest', MedicalRequestSchema);
+const ChatConversation  = mongoose.model('ChatConversation', ChatConversationSchema);
+const ChatMessage       = mongoose.model('ChatMessage', ChatMessageSchema);
+const Notification      = mongoose.model('Notification', NotificationSchema);
+const Redemption        = mongoose.model('Redemption', RedemptionSchema);
 
 /**
- * Connect to MongoDB
+ * Connect to MongoDB Atlas
  */
 async function connectDatabase() {
-  if (!USE_MONGODB) {
-    console.log('📦 Using in-memory database (development mode)');
-    return;
-  }
-
   try {
-    await mongoose.connect(DATABASE_URL, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true
-    });
-    console.log('✅ Connected to MongoDB');
+    await mongoose.connect(MONGODB_URI);
+    console.log('✅ Connected to MongoDB Atlas');
   } catch (error) {
-    console.error('❌ MongoDB connection error:', error);
-    throw error;
+    console.error('❌ MongoDB connection error:', error.message);
+    // Retry once after 3 seconds
+    console.log('🔄 Retrying connection in 3 seconds...');
+    await new Promise(r => setTimeout(r, 3000));
+    try {
+      await mongoose.connect(MONGODB_URI);
+      console.log('✅ Connected to MongoDB Atlas (retry)');
+    } catch (retryError) {
+      console.error('❌ MongoDB retry failed:', retryError.message);
+      throw retryError;
+    }
   }
 }
 
@@ -135,22 +221,21 @@ async function connectDatabase() {
  * Disconnect from MongoDB
  */
 async function disconnectDatabase() {
-  if (USE_MONGODB) {
-    await mongoose.disconnect();
-    console.log('🔌 Disconnected from MongoDB');
-  }
+  await mongoose.disconnect();
+  console.log('🔌 Disconnected from MongoDB');
 }
 
 module.exports = {
   connectDatabase,
   disconnectDatabase,
-  models: {
-    User,
-    Institution,
-    LostItem,
-    FoundItem,
-    Match,
-    Redemption
-  },
-  USE_MONGODB
+  User,
+  LostItem,
+  FoundItem,
+  Match,
+  Emergency,
+  MedicalRequest,
+  ChatConversation,
+  ChatMessage,
+  Notification,
+  Redemption,
 };
