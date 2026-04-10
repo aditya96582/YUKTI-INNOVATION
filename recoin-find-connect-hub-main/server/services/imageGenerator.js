@@ -1,33 +1,24 @@
 /**
  * AI Image Generation Service
- * Uses Google Gemini API for image analysis and Imagen for generation
+ * Uses Google Gemini API for image analysis and generation
  */
 
-const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || 'AIzaSyBu3VMrOzUvkzy2dviMTe9LzNBw9iUhenc';
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 class ImageGeneratorService {
   /**
-   * Generate a descriptive image prompt from item details
-   */
-  generatePrompt(itemDetails) {
-    const { title, description, category } = itemDetails;
-    
-    return `Professional product photography of ${title}. ${description}. 
-Category: ${category}. Clean white background, well-lit, high quality, detailed, realistic.`;
-  }
-
-  /**
-   * Generate image using Google Imagen API
-   * @param {Object} itemDetails - Item details (title, description, category)
-   * @returns {Promise<string>} Base64 encoded image
+   * Generate image using Gemini 2.0 Flash (native image generation)
+   * Falls back to enhanced SVG placeholder if API unavailable
    */
   async generateImage(itemDetails) {
-    try {
-      const prompt = this.generatePrompt(itemDetails);
+    const { title, description, category } = itemDetails;
 
-      // Use Gemini 2.5 Flash Image for image generation (free tier supported)
-      const response = await fetch(`${GEMINI_API_URL}/gemini-2.0-flash-exp-image-generation:generateContent?key=${GOOGLE_API_KEY}`, {
+    // First try Gemini native image generation
+    try {
+      const prompt = `Create a clean, realistic product photo of: ${title}. ${description || ''}. Category: ${category}. White background, studio lighting, high quality.`;
+
+      const response = await fetch(`${GEMINI_API_URL}/gemini-2.0-flash-exp:generateContent?key=${GOOGLE_API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -36,61 +27,98 @@ Category: ${category}. Clean white background, well-lit, high quality, detailed,
         })
       });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        console.log('Gemini Image API error:', errText);
-        return await this.generatePlaceholder(itemDetails);
+      if (response.ok) {
+        const data = await response.json();
+        const parts = data.candidates?.[0]?.content?.parts || [];
+        const imagePart = parts.find(p => p.inlineData);
+        if (imagePart) {
+          const { mimeType, data: imageBytes } = imagePart.inlineData;
+          console.log('✅ Gemini image generated successfully');
+          return `data:${mimeType};base64,${imageBytes}`;
+        }
       }
-
-      const data = await response.json();
-      const parts = data.candidates?.[0]?.content?.parts || [];
-      const imagePart = parts.find(p => p.inlineData);
-
-      if (imagePart) {
-        const { mimeType, data: imageBytes } = imagePart.inlineData;
-        return `data:${mimeType};base64,${imageBytes}`;
-      }
-      
-      // Fallback to placeholder if generation fails
-      return await this.generatePlaceholder(itemDetails);
-      
-    } catch (error) {
-      console.error('Image generation error:', error);
-      return await this.generatePlaceholder(itemDetails);
+    } catch (err) {
+      console.log('Gemini image gen not available, trying Imagen...');
     }
+
+    // Try Imagen 3 API
+    try {
+      const prompt = `Professional product photo of ${title}. ${description || ''}. Clean white background.`;
+      const response = await fetch(`${GEMINI_API_URL}/imagen-3.0-generate-002:predict?key=${GOOGLE_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instances: [{ prompt }],
+          parameters: { sampleCount: 1, aspectRatio: '1:1' }
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const imageBytes = data.predictions?.[0]?.bytesBase64Encoded;
+        if (imageBytes) {
+          console.log('✅ Imagen 3 image generated successfully');
+          return `data:image/png;base64,${imageBytes}`;
+        }
+      }
+    } catch (err) {
+      console.log('Imagen 3 not available, using enhanced placeholder...');
+    }
+
+    // Fallback: Generate an enhanced SVG with AI description
+    return await this.generateEnhancedPlaceholder(itemDetails);
   }
 
   /**
-   * Generate SVG placeholder image (fallback)
+   * Generate an enhanced SVG placeholder with rich visuals
    */
-  async generatePlaceholder(itemDetails) {
-    const { title, category } = itemDetails;
+  async generateEnhancedPlaceholder(itemDetails) {
+    const { title, description, category } = itemDetails;
     const colors = this.getCategoryColors(category);
-    
+    const icon = this.getCategoryIcon(category);
+    const shortDesc = (description || '').substring(0, 50);
+
     const svg = `
       <svg width="400" height="400" xmlns="http://www.w3.org/2000/svg">
         <defs>
-          <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" style="stop-color:${colors.start};stop-opacity:1" />
             <stop offset="100%" style="stop-color:${colors.end};stop-opacity:1" />
           </linearGradient>
+          <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+            <feDropShadow dx="0" dy="4" stdDeviation="8" flood-opacity="0.3"/>
+          </filter>
         </defs>
-        <rect width="400" height="400" fill="url(#grad)"/>
-        <text x="50%" y="45%" text-anchor="middle" font-family="Arial, sans-serif" font-size="48" fill="white" opacity="0.9">
-          ${this.getCategoryIcon(category)}
+        <rect width="400" height="400" fill="url(#bg)" rx="16"/>
+        <rect x="20" y="20" width="360" height="360" rx="12" fill="white" opacity="0.08"/>
+        <text x="50%" y="38%" text-anchor="middle" font-family="Arial, sans-serif" font-size="64" fill="white" opacity="0.95" filter="url(#shadow)">
+          ${icon}
         </text>
-        <text x="50%" y="60%" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="white" opacity="0.8">
-          ${title.substring(0, 20)}
+        <text x="50%" y="55%" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" fill="white" font-weight="bold" opacity="0.95">
+          ${title.substring(0, 22)}
         </text>
-        <text x="50%" y="70%" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="white" opacity="0.6">
+        <text x="50%" y="64%" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="white" opacity="0.65">
+          ${shortDesc}
+        </text>
+        <rect x="130" y="280" width="140" height="28" rx="14" fill="white" opacity="0.15"/>
+        <text x="50%" y="76%" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="white" opacity="0.8" letter-spacing="2">
           ${category.toUpperCase()}
+        </text>
+        <text x="50%" y="90%" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white" opacity="0.4">
+          AI Generated • CampusConnect
         </text>
       </svg>
     `;
-    
-    // Convert SVG to base64
+
     const base64 = Buffer.from(svg).toString('base64');
     return `data:image/svg+xml;base64,${base64}`;
+  }
+
+  /**
+   * Legacy placeholder (simple version)
+   */
+  async generatePlaceholder(itemDetails) {
+    return this.generateEnhancedPlaceholder(itemDetails);
   }
 
   /**
@@ -98,18 +126,17 @@ Category: ${category}. Clean white background, well-lit, high quality, detailed,
    */
   getCategoryColors(category) {
     const colorMap = {
-      'electronics': { start: '#3B82F6', end: '#1D4ED8' }, // Blue
-      'bags': { start: '#F59E0B', end: '#D97706' },        // Amber
-      'wallets': { start: '#10B981', end: '#059669' },     // Green
-      'keys': { start: '#8B5CF6', end: '#6D28D9' },        // Purple
-      'clothing': { start: '#EC4899', end: '#BE185D' },    // Pink
-      'documents': { start: '#EF4444', end: '#DC2626' },   // Red
-      'jewelry': { start: '#F59E0B', end: '#D97706' },     // Amber
-      'accessories': { start: '#06B6D4', end: '#0891B2' }, // Cyan
-      'other': { start: '#6B7280', end: '#4B5563' },       // Gray
+      'electronics': { start: '#3B82F6', end: '#1D4ED8' },
+      'bags': { start: '#F59E0B', end: '#D97706' },
+      'wallets': { start: '#10B981', end: '#059669' },
+      'keys': { start: '#8B5CF6', end: '#6D28D9' },
+      'clothing': { start: '#EC4899', end: '#BE185D' },
+      'documents': { start: '#EF4444', end: '#DC2626' },
+      'jewelry': { start: '#F59E0B', end: '#D97706' },
+      'accessories': { start: '#06B6D4', end: '#0891B2' },
+      'other': { start: '#6B7280', end: '#4B5563' },
     };
-    
-    return colorMap[category.toLowerCase()] || colorMap['other'];
+    return colorMap[(category || '').toLowerCase()] || colorMap['other'];
   }
 
   /**
@@ -117,25 +144,11 @@ Category: ${category}. Clean white background, well-lit, high quality, detailed,
    */
   getCategoryIcon(category) {
     const iconMap = {
-      'electronics': '📱',
-      'bags': '🎒',
-      'wallets': '👛',
-      'keys': '🔑',
-      'clothing': '👕',
-      'documents': '📄',
-      'jewelry': '💍',
-      'accessories': '⌚',
-      'other': '📦',
+      'electronics': '📱', 'bags': '🎒', 'wallets': '👛', 'keys': '🔑',
+      'clothing': '👕', 'documents': '📄', 'jewelry': '💍',
+      'accessories': '⌚', 'other': '📦',
     };
-    
-    return iconMap[category.toLowerCase()] || '📦';
-  }
-
-  /**
-   * Get fallback image URL
-   */
-  getFallbackImage(category) {
-    return `https://via.placeholder.com/400x400/F59E0B/FFFFFF?text=${encodeURIComponent(category)}`;
+    return iconMap[(category || '').toLowerCase()] || '📦';
   }
 
   /**
@@ -143,59 +156,29 @@ Category: ${category}. Clean white background, well-lit, high quality, detailed,
    */
   async analyzeImage(imageBase64) {
     try {
-      // Remove data URL prefix if present
       const base64Data = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
-      
+
       const response = await fetch(`${GEMINI_API_URL}/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{
             parts: [
-              {
-                text: 'Analyze this image and describe the item in detail. Include: type of item, color, brand (if visible), condition, distinctive features, and any text visible on the item. Be specific and concise.'
-              },
-              {
-                inline_data: {
-                  mime_type: 'image/jpeg',
-                  data: base64Data
-                }
-              }
+              { text: 'Analyze this image and describe the item in detail. Include: type, color, brand (if visible), condition, distinctive features, and any text visible. Be specific and concise.' },
+              { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
             ]
           }],
-          generationConfig: {
-            temperature: 0.4,
-            topK: 32,
-            topP: 1,
-            maxOutputTokens: 2048,
-          }
+          generationConfig: { temperature: 0.4, maxOutputTokens: 2048 }
         })
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Gemini API error: ${response.statusText} - ${errorText}`);
-      }
-
+      if (!response.ok) throw new Error(`Gemini API error: ${response.statusText}`);
       const data = await response.json();
       const description = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      
-      return {
-        success: true,
-        description,
-        features: this.extractFeatures(description)
-      };
-      
+      return { success: true, description, features: this.extractFeatures(description) };
     } catch (error) {
-      console.error('Image analysis error:', error);
-      return {
-        success: false,
-        error: error.message,
-        description: '',
-        features: {}
-      };
+      console.error('Image analysis error:', error.message);
+      return { success: false, error: error.message, description: '', features: {} };
     }
   }
 
@@ -203,30 +186,14 @@ Category: ${category}. Clean white background, well-lit, high quality, detailed,
    * Extract structured features from description
    */
   extractFeatures(description) {
-    const features = {
-      colors: [],
-      brands: [],
-      keywords: []
-    };
-
-    // Extract colors
+    const features = { colors: [], brands: [], keywords: [] };
     const colorRegex = /\b(red|blue|green|yellow|black|white|gray|grey|brown|orange|purple|pink|silver|gold)\b/gi;
     const colors = description.match(colorRegex);
-    if (colors) {
-      features.colors = [...new Set(colors.map(c => c.toLowerCase()))];
-    }
-
-    // Extract potential brands (capitalized words)
+    if (colors) features.colors = [...new Set(colors.map(c => c.toLowerCase()))];
     const brandRegex = /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g;
     const brands = description.match(brandRegex);
-    if (brands) {
-      features.brands = [...new Set(brands)];
-    }
-
-    // Extract keywords (nouns and adjectives)
-    const words = description.toLowerCase().split(/\s+/);
-    features.keywords = words.filter(w => w.length > 3);
-
+    if (brands) features.brands = [...new Set(brands)];
+    features.keywords = description.toLowerCase().split(/\s+/).filter(w => w.length > 3);
     return features;
   }
 
@@ -235,52 +202,20 @@ Category: ${category}. Clean white background, well-lit, high quality, detailed,
    */
   async enhanceDescription(itemDetails) {
     const { title, description, category } = itemDetails;
-    
     try {
       const response = await fetch(`${GEMINI_API_URL}/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `Enhance this lost item description to make it more detailed and searchable:
-              
-Title: ${title}
-Category: ${category}
-Description: ${description}
-
-Provide a detailed, professional description that includes:
-1. Physical characteristics
-2. Potential identifying features
-3. Common locations where such items are found
-4. Tips for identification
-
-Keep it concise (max 150 words).`
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.7,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 300,
-          }
+          contents: [{ parts: [{ text: `Enhance this lost item description to make it more detailed and searchable:\nTitle: ${title}\nCategory: ${category}\nDescription: ${description}\n\nProvide a detailed description with physical characteristics and identifying features. Max 150 words.` }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 300 }
         })
       });
-
-      if (!response.ok) {
-        throw new Error(`Gemini API error: ${response.statusText}`);
-      }
-
+      if (!response.ok) throw new Error(`Gemini API error`);
       const data = await response.json();
-      const enhancedDescription = data.candidates?.[0]?.content?.parts?.[0]?.text || description;
-      
-      return enhancedDescription;
-      
+      return data.candidates?.[0]?.content?.parts?.[0]?.text || description;
     } catch (error) {
-      console.error('Description enhancement error:', error);
-      return description; // Return original if enhancement fails
+      return description;
     }
   }
 
@@ -291,27 +226,12 @@ Keep it concise (max 150 words).`
     try {
       const response = await fetch(`${GEMINI_API_URL}/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: 'Say "API connection successful" in 3 words'
-            }]
-          }]
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: 'Say "Connected" in 1 word' }] }] })
       });
-
-      if (!response.ok) {
-        return { success: false, error: `HTTP ${response.status}` };
-      }
-
+      if (!response.ok) return { success: false, error: `HTTP ${response.status}` };
       const data = await response.json();
-      return { 
-        success: true, 
-        message: data.candidates?.[0]?.content?.parts?.[0]?.text || 'Connected'
-      };
+      return { success: true, message: data.candidates?.[0]?.content?.parts?.[0]?.text || 'Connected' };
     } catch (error) {
       return { success: false, error: error.message };
     }

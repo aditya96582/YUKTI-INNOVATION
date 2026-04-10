@@ -1,6 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// This file intentionally left empty.
+// Supabase has been removed. All data operations go through the Express backend API.
+// See src/services/api.ts for all API calls.

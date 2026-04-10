@@ -1,18 +1,36 @@
-const BASE = 'http://localhost:5000/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
+/**
+ * Get stored JWT token
+ */
+function getToken(): string | null {
+  return localStorage.getItem('cc_token');
+}
+
+/**
+ * Core fetch wrapper with JWT auth headers
+ */
 async function apiFetch(path: string, options?: RequestInit) {
   try {
-    const res = await fetch(`${BASE}${path}`, {
-      headers: { 'Content-Type': 'application/json' },
+    const token = getToken();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const res = await fetch(`${API_URL}${path}`, {
+      headers,
       ...options,
     });
-    
+
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({ error: 'Request failed' }));
       console.error(`API Error [${res.status}]:`, errorData);
       throw new Error(errorData.error || `Request failed with status ${res.status}`);
     }
-    
+
     return await res.json();
   } catch (error) {
     console.error('API Fetch Error:', error);
@@ -20,7 +38,23 @@ async function apiFetch(path: string, options?: RequestInit) {
   }
 }
 
-// Medical API
+// ─── Auth API ───────────────────────────────────────────────────────────────────
+export const authApi = {
+  signup: (name: string, email: string, password: string) =>
+    apiFetch('/auth/signup', { method: 'POST', body: JSON.stringify({ name, email, password }) }),
+
+  login: (email: string, password: string) =>
+    apiFetch('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+
+  getMe: () => apiFetch('/auth/me'),
+
+  updateProfile: (data: Record<string, any>) =>
+    apiFetch('/auth/profile', { method: 'PUT', body: JSON.stringify(data) }),
+
+  searchUsers: (q: string) => apiFetch(`/auth/users/search?q=${encodeURIComponent(q)}`),
+};
+
+// ─── Medical API ────────────────────────────────────────────────────────────────
 export const medicalApi = {
   getAll: () => apiFetch('/medical'),
   create: (data: { medicines: any[]; location: string; userId: string; userName: string }) =>
@@ -39,7 +73,7 @@ export const medicalApi = {
     apiFetch(`/medical/alternatives/${encodeURIComponent(name)}`),
 };
 
-// Items API
+// ─── Items API ──────────────────────────────────────────────────────────────────
 export const itemsApi = {
   getLost: () => apiFetch('/items/lost'),
   getFound: () => apiFetch('/items/found'),
@@ -47,15 +81,46 @@ export const itemsApi = {
     apiFetch('/items/lost', { method: 'POST', body: JSON.stringify(data) }),
   createFound: (data: any) =>
     apiFetch('/items/found', { method: 'POST', body: JSON.stringify(data) }),
+  updateItem: (type: string, id: string, data: any) =>
+    apiFetch(`/items/${type}/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  resolveItem: (type: string, id: string) =>
+    apiFetch(`/items/${type}/${id}/resolve`, { method: 'PUT' }),
+  deleteItem: (type: string, id: string) =>
+    apiFetch(`/items/${type}/${id}`, { method: 'DELETE' }),
   runAIMatch: (lostItemId: string, foundItemIds?: string[]) =>
     apiFetch('/items/match/ai', { method: 'POST', body: JSON.stringify({ lostItemId, foundItemIds }) }),
   runBatchMatch: () =>
     apiFetch('/items/match/batch', { method: 'POST' }),
+  getAllMatches: () =>
+    apiFetch('/items/matches'),
   getMatches: (itemId: string) =>
     apiFetch(`/items/matches/${itemId}`),
 };
 
-// Redemption API
+
+// ─── Emergency API ──────────────────────────────────────────────────────────────
+export const emergencyApi = {
+  getAll: () => apiFetch('/emergencies'),
+  create: (data: any) =>
+    apiFetch('/emergencies', { method: 'POST', body: JSON.stringify(data) }),
+  respond: (id: string, userId: string, userName: string) =>
+    apiFetch(`/emergencies/${id}/respond`, { method: 'PUT', body: JSON.stringify({ userId, userName }) }),
+  resolve: (id: string) =>
+    apiFetch(`/emergencies/${id}/resolve`, { method: 'PUT' }),
+};
+
+// ─── Chat API ───────────────────────────────────────────────────────────────────
+export const chatApi = {
+  getConversations: (userId: string) => apiFetch(`/chat/conversations/${userId}`),
+  createConversation: (participants: any[], relatedTo?: any) =>
+    apiFetch('/chat/conversations', { method: 'POST', body: JSON.stringify({ participants, relatedTo }) }),
+  sendMessage: (conversationId: string, senderId: string, senderName: string, content: string) =>
+    apiFetch(`/chat/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ senderId, senderName, content }) }),
+  addMember: (conversationId: string, participant: { id: string; name: string }) =>
+    apiFetch(`/chat/conversations/${conversationId}/members`, { method: 'POST', body: JSON.stringify({ participant }) }),
+};
+
+// ─── Redemption API ─────────────────────────────────────────────────────────────
 export const redemptionApi = {
   getPartners: () => apiFetch('/redemption/partners'),
   redeem: (userId: string, partnerId: string, coins: number) =>
@@ -64,30 +129,20 @@ export const redemptionApi = {
     apiFetch(`/redemption/history/${userId}`),
 };
 
-// Pharmacy API
+// ─── Pharmacy API ───────────────────────────────────────────────────────────────
 export const pharmacyApi = {
   getAll: () => apiFetch('/pharmacies'),
 };
 
-// Image Generation API — calls Supabase Edge Function which uses Gemini API
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-
+// ─── Image API — calls backend directly ─────────────────────────────────────────
 export const imageApi = {
   generate: async (title: string, description: string, category: string): Promise<string | null> => {
     try {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-image`, {
+      const res = await apiFetch('/images/generate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${SUPABASE_KEY}`,
-          'apikey': SUPABASE_KEY,
-        },
         body: JSON.stringify({ title, description, category }),
       });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data?.imageUrl ?? null;
+      return res?.image ?? null;
     } catch {
       return null;
     }
@@ -102,7 +157,7 @@ export const imageApi = {
         body: JSON.stringify({
           contents: [{ parts: [
             { text: 'Analyze this image and describe the item. Include type, color, brand if visible, and distinctive features. Be concise.' },
-            { inline_data: { mime_type: 'image/jpeg', data: base64 } }
+            { inline_data: { mime_type: 'image/jpeg', data: base64 } },
           ]}],
         }),
       });
