@@ -203,6 +203,7 @@ async function connectDatabase() {
     };
     await mongoose.connect(MONGODB_URI, options);
     console.log('✅ Connected to MongoDB Atlas');
+    return 'atlas';
   } catch (error) {
     console.error('❌ MongoDB Atlas connection error:', error.message);
     try {
@@ -212,6 +213,7 @@ async function connectDatabase() {
       const uri = mongod.getUri();
       await mongoose.connect(uri);
       console.log('✅ Connected to Local In-Memory Database (No internet blockages!)');
+      return 'local';
     } catch (fallbackError) {
        console.error('❌ Fallback database failed too:', fallbackError);
        throw fallbackError;

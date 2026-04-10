@@ -67,12 +67,12 @@ app.use((err, req, res, next) => {
 // Start server
 async function startServer() {
   try {
-    await connectDatabase();
+    const dbType = await connectDatabase();
 
     server.listen(PORT, () => {
       console.log(`\n🚀 CampusConnect AI Backend running on http://localhost:${PORT}`);
       console.log(`🔌 WebSocket server ready for real-time notifications`);
-      console.log(`📦 Database: MongoDB Atlas (cloud)`);
+      console.log(`📦 Database: ${dbType === 'atlas' ? 'MongoDB Atlas (cloud)' : 'Local In-Memory (Fallback)'}`);
       console.log(`\n📡 API Endpoints:`);
       console.log(`  Auth:         POST   /api/auth/signup`);
       console.log(`                POST   /api/auth/login`);
@@ -90,13 +90,14 @@ async function startServer() {
       console.log(`                POST   /api/chat/conversations`);
       console.log(`  Redemption:   GET    /api/redemption/partners`);
       console.log(`  Pharmacies:   GET    /api/pharmacies`);
-      console.log(`\n✨ All data persisted to MongoDB Atlas\n`);
+      console.log(`\n✨ All data persisted to ${dbType === 'atlas' ? 'MongoDB Atlas' : 'Local Memory'}\n`);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
   }
 }
+
 
 startServer();
 
