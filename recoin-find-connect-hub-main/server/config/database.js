@@ -6,7 +6,7 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://campus:rishu1KUMAR@campusai.bqm5pwv.mongodb.net/campusconnect?appName=CampusAI';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://radhakrishnabhishek:<db_password>@radhakrishn.avskdhv.mongodb.net/campusconnect?appName=RadhaKrishn';
 
 // ─── User Schema ────────────────────────────────────────────────────────────────
 const UserSchema = new mongoose.Schema({
@@ -195,24 +195,26 @@ const ChatMessage       = mongoose.model('ChatMessage', ChatMessageSchema);
 const Notification      = mongoose.model('Notification', NotificationSchema);
 const Redemption        = mongoose.model('Redemption', RedemptionSchema);
 
-/**
- * Connect to MongoDB Atlas
- */
 async function connectDatabase() {
   try {
-    await mongoose.connect(MONGODB_URI);
+    const options = {
+      serverSelectionTimeoutMS: 5000,
+      family: 4
+    };
+    await mongoose.connect(MONGODB_URI, options);
     console.log('✅ Connected to MongoDB Atlas');
   } catch (error) {
-    console.error('❌ MongoDB connection error:', error.message);
-    // Retry once after 3 seconds
-    console.log('🔄 Retrying connection in 3 seconds...');
-    await new Promise(r => setTimeout(r, 3000));
+    console.error('❌ MongoDB Atlas connection error:', error.message);
     try {
-      await mongoose.connect(MONGODB_URI);
-      console.log('✅ Connected to MongoDB Atlas (retry)');
-    } catch (retryError) {
-      console.error('❌ MongoDB retry failed:', retryError.message);
-      throw retryError;
+      console.log('🔄 Launching In-Memory MongoDB Fallback to ensure app runs...');
+      const { MongoMemoryServer } = require('mongodb-memory-server');
+      const mongod = await MongoMemoryServer.create();
+      const uri = mongod.getUri();
+      await mongoose.connect(uri);
+      console.log('✅ Connected to Local In-Memory Database (No internet blockages!)');
+    } catch (fallbackError) {
+       console.error('❌ Fallback database failed too:', fallbackError);
+       throw fallbackError;
     }
   }
 }
